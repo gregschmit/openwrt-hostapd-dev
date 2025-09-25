@@ -1,0 +1,56 @@
+From: Gregory N. Schmit <schmitgreg@gmail.com>
+Date: Wed, 24 Sep 2025 16:53:55 -0500
+Subject: [PATCH] hostapd: Store RADIUS Access-Accept in STA Info
+
+Store RADIUS Access-Accept message in the `sta_info` struct so it can
+be retrieved later if needed, e.g. to inspect RADIUS attributes. This
+change is required to support the ability of the ubus component to
+provide RADIUS attributes on the `authorized` event and the
+`get_clients` call. This change is motivated by a dynamic tunnel
+initiator program I am working on, which needs to know the tunnel
+parameters provided by the RADIUS server, however it could be useful
+for other purposes as well.
+
+--- a/src/ap/ieee802_1x.c
++++ b/src/ap/ieee802_1x.c
+@@ -2077,6 +2077,12 @@ ieee802_1x_receive_auth(struct radius_msg *msg, struct radius_msg *req,
+ 
+ 	switch (hdr->code) {
+ 	case RADIUS_CODE_ACCESS_ACCEPT:
++		/* Store the RADIUS Access-Accept message for later retrieval. */
++		radius_msg_free(sta->radius_accept_msg);
++		sta->radius_accept_msg = radius_msg_parse(
++			wpabuf_head(radius_msg_get_buf(msg)),
++			wpabuf_len(radius_msg_get_buf(msg))
++		);
+ #ifndef CONFIG_NO_VLAN
+ 		if (hapd->conf->ssid.dynamic_vlan != DYNAMIC_VLAN_DISABLED &&
+ 		    ieee802_1x_update_vlan(msg, hapd, sta) < 0)
+--- a/src/ap/sta_info.c
++++ b/src/ap/sta_info.c
+@@ -439,6 +439,7 @@ void ap_free_sta(struct hostapd_data *hapd, struct sta_info *sta)
+ 	hostapd_free_psk_list(sta->psk);
+ 	os_free(sta->identity);
+ 	os_free(sta->radius_cui);
++	radius_msg_free(sta->radius_accept_msg);
+ 	os_free(sta->t_c_url);
+ 	wpabuf_free(sta->hs20_deauth_req);
+ 	os_free(sta->hs20_session_info_url);
+--- a/src/ap/sta_info.h
++++ b/src/ap/sta_info.h
+@@ -55,6 +55,7 @@
+ #define WLAN_SUPP_RATES_MAX 32
+ 
+ struct hostapd_data;
++struct radius_msg;
+ 
+ struct mbo_non_pref_chan_info {
+ 	struct mbo_non_pref_chan_info *next;
+@@ -187,6 +188,7 @@ struct sta_info {
+ 
+ 	char *identity; /* User-Name from RADIUS */
+ 	char *radius_cui; /* Chargeable-User-Identity from RADIUS */
++	struct radius_msg *radius_accept_msg; /* RADIUS Access-Accept Message */
+ 
+ 	struct ieee80211_ht_capabilities *ht_capabilities;
+ 	struct ieee80211_vht_capabilities *vht_capabilities;
